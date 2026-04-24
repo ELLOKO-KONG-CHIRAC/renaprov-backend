@@ -1,24 +1,34 @@
-const functions = require("firebase-functions");
+const express = require("express");
 const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 
+const app = express();
+app.use(express.json());
+
+// Autoriser les appels depuis ton site web
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(204).send("");
+  next();
+});
+
 // ============================================================
-// ⚙️ CONFIGURATION — Remplace par tes vraies valeurs MTN MoMo
+// ⚙️ CONFIGURATION — Lire les variables d'environnement Render
 // ============================================================
 const MTN_CONFIG = {
-  userId: "f131bb1d-1b1a-40fa-9e84-78d3c84b1967",         // Ton User ID MTN MoMo
-  apiKey: "d541a73e122c488db0d6765a396acc0b",         // Ton API Key MTN MoMo
-  subscriptionKey: "0b1707c4eed24c6689b0c91bc91badde", // Ta Subscription Key
-  environment: "sandbox",            // Change en "production" quand tu es prêt
-  callbackUrl: "https://renaprov.com/callback", // Ton vrai URL de callback
+  userId: process.env.MTN_USER_ID,
+  apiKey: process.env.MTN_API_KEY,
+  subscriptionKey: process.env.MTN_SUBSCRIPTION_KEY,
+  environment: process.env.MTN_ENVIRONMENT || "mtncameroon",
+  callbackUrl: process.env.MTN_CALLBACK_URL,
 };
 
-const BASE_URL = MTN_CONFIG.environment === "sandbox"
-  ? "https://sandbox.momodeveloper.mtn.com"
-  : "https://proxy.momoapi.mtn.com";
+const BASE_URL = "https://proxy.momoapi.mtn.com";
 
 // ============================================================
-// 🔑 ÉTAPE 1 — Obtenir un token d'accès MTN
+// 🔑 Obtenir un token d'accès MTN
 // ============================================================
 async function getMtnToken() {
   const credentials = Buffer.from(
@@ -39,40 +49,27 @@ async function getMtnToken() {
 }
 
 // ============================================================
-// 💳 FONCTION 1 — Demander un paiement MTN MoMo
+// 💳 ROUTE 1 — Demander un paiement MTN MoMo
+// POST /request-payment
 // ============================================================
-exports.requestMtnPayment = functions.https.onRequest(async (req, res) => {
-  // Autoriser les appels depuis ton site web
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
-
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Méthode non autorisée" });
-    return;
-  }
-
+app.post("/request-payment", async (req, res) => {
   const { phone, amount, name } = req.body;
 
-  // Validation des données reçues
   if (!phone || !amount || !name) {
-    res.status(400).json({ error: "Données manquantes : phone, amount, name requis" });
-    return;
+    return res.status(400).json({
+      error: "Données manquantes : phone, amount, name requis",
+    });
   }
 
   if (!/^\d{9}$/.test(phone)) {
-    res.status(400).json({ error: "Numéro de téléphone invalide (9 chiffres sans indicatif)" });
-    return;
+    return res.status(400).json({
+      error: "Numéro invalide — entre 9 chiffres sans indicatif (ex: 672996717)",
+    });
   }
 
   try {
     const token = await getMtnToken();
-    const referenceId = uuidv4(); // ID unique pour cette transaction
+    const referenceId = uuidv4();
 
     await axios.post(
       `${BASE_URL}/collection/v1_0/requesttopay`,
@@ -82,7 +79,7 @@ exports.requestMtnPayment = functions.https.onRequest(async (req, res) => {
         externalId: referenceId,
         payer: {
           partyIdType: "MSISDN",
-          partyId: `237${phone}`, // Ajoute l'indicatif Cameroun
+          partyId: `237${phone}`,
         },
         payerMessage: `Souscription IPO RENAPROV - ${name}`,
         payeeNote: `Paiement de ${name} pour IPO RENAPROV`,
@@ -99,15 +96,14 @@ exports.requestMtnPayment = functions.https.onRequest(async (req, res) => {
       }
     );
 
-    // Retourne l'ID de référence au site pour vérification ultérieure
     res.status(200).json({
       success: true,
       referenceId: referenceId,
-      message: "Demande de paiement envoyée. Le client doit confirmer sur son téléphone.",
+      message: "Demande envoyée. Le client doit confirmer sur son téléphone.",
     });
 
   } catch (error) {
-    console.error("Erreur MTN MoMo requestToPay:", error.response?.data || error.message);
+    console.error("Erreur requestToPay:", error.response?.data || error.message);
     res.status(500).json({
       success: false,
       error: "Erreur lors de la demande de paiement MTN MoMo",
@@ -116,23 +112,14 @@ exports.requestMtnPayment = functions.https.onRequest(async (req, res) => {
 });
 
 // ============================================================
-// ✅ FONCTION 2 — Vérifier le statut d'un paiement
+// ✅ ROUTE 2 — Vérifier le statut d'un paiement
+// POST /check-payment
 // ============================================================
-exports.checkMtnPayment = functions.https.onRequest(async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
-
+app.post("/check-payment", async (req, res) => {
   const { referenceId } = req.body;
 
   if (!referenceId) {
-    res.status(400).json({ error: "referenceId manquant" });
-    return;
+    return res.status(400).json({ error: "referenceId manquant" });
   }
 
   try {
@@ -150,7 +137,7 @@ exports.checkMtnPayment = functions.https.onRequest(async (req, res) => {
     );
 
     const status = response.data.status;
-    // Statuts possibles : PENDING, SUCCESSFUL, FAILED, REJECTED
+    // Statuts MTN : PENDING, SUCCESSFUL, FAILED, REJECTED
 
     res.status(200).json({
       success: true,
@@ -159,10 +146,40 @@ exports.checkMtnPayment = functions.https.onRequest(async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Erreur MTN MoMo checkPayment:", error.response?.data || error.message);
+    console.error("Erreur checkPayment:", error.response?.data || error.message);
     res.status(500).json({
       success: false,
       error: "Erreur lors de la vérification du paiement",
     });
   }
+});
+
+// ============================================================
+// 📩 ROUTE 3 — Recevoir les notifications MTN (Callback)
+// POST /callback
+// ============================================================
+app.post("/callback", (req, res) => {
+  console.log("📩 Callback MTN reçu:", JSON.stringify(req.body));
+  res.status(200).send("OK");
+});
+
+// ============================================================
+// 🏠 ROUTE TEST — Vérifier que le serveur fonctionne
+// GET /
+// ============================================================
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "✅ Serveur RENAPROV MTN MoMo opérationnel",
+    routes: [
+      "POST /request-payment",
+      "POST /check-payment",
+      "POST /callback",
+    ],
+  });
+});
+
+// Démarrer le serveur
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Serveur démarré sur le port ${PORT}`);
 });
