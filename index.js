@@ -178,6 +178,53 @@ app.get("/", (req, res) => {
   });
 });
 
+// ============================================================
+// 🔧 ROUTE — Créer un API User MTN Production
+// POST /create-api-user
+// ============================================================
+app.post("/create-api-user", async (req, res) => {
+  const { userId } = req.body;
+  try {
+    await axios.post(
+      `${BASE_URL}/v1_0/apiuser`,
+      { providerCallbackHost: MTN_CONFIG.callbackUrl },
+      {
+        headers: {
+          "X-Reference-Id": userId,
+          "Ocp-Apim-Subscription-Key": MTN_CONFIG.subscriptionKey,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    res.json({ success: true, userId });
+  } catch (error) {
+    res.status(500).json({ error: error.response?.data || error.message });
+  }
+});
+
+// ============================================================
+// 🔧 ROUTE — Générer l'API Key MTN Production
+// POST /create-api-key
+// ============================================================
+app.post("/create-api-key", async (req, res) => {
+  const { userId } = req.body;
+  try {
+    const response = await axios.post(
+      `${BASE_URL}/v1_0/apiuser/${userId}/apikey`,
+      {},
+      {
+        headers: {
+          "Ocp-Apim-Subscription-Key": MTN_CONFIG.subscriptionKey,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    res.json({ success: true, apiKey: response.data.apiKey });
+  } catch (error) {
+    res.status(500).json({ error: error.response?.data || error.message });
+  }
+});
+
 // Démarrer le serveur
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
