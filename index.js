@@ -186,7 +186,7 @@ app.post("/create-api-user", async (req, res) => {
   const { userId } = req.body;
   try {
     await axios.post(
-      `${BASE_URL}/v1_0/apiuser`,
+      `${BASE_URL}/collection/v1_0/apiuser`,
       { providerCallbackHost: MTN_CONFIG.callbackUrl },
       {
         headers: {
@@ -210,7 +210,7 @@ app.post("/create-api-key", async (req, res) => {
   const { userId } = req.body;
   try {
     const response = await axios.post(
-      `${BASE_URL}/v1_0/apiuser/${userId}/apikey`,
+      `${BASE_URL}/collection/v1_0/apiuser/${userId}/apikey`,
       {},
       {
         headers: {
